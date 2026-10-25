@@ -9,7 +9,7 @@ async function expectDrop(page) {
   expect(await page.evaluate(() => inkTideDiagnostics.surface().tool)).toBe('drop');
 }
 async function saved(page, study) {
-  await page.waitForFunction(async study => {
+  await expect.poll(() => page.evaluate(async () => {
     const value = await new Promise(resolve => {
       const request = indexedDB.open('ink-tide-bath-v3', 1);
       request.onsuccess = () => {
@@ -17,8 +17,8 @@ async function saved(page, study) {
         read.onsuccess = () => { db.close(); resolve(read.result); };
       };
     });
-    return value?.study === study;
-  }, study);
+    return value?.study;
+  })).toBe(study);
 }
 test('Drop is selected in the HTML before scripts run', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });

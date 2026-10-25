@@ -84,7 +84,7 @@
   }
   function combFrame(g){
     if(gesture!==g)return;g.frame=null;const start=performance.now();if(g.index<g.queue.length&&!g.saved){remember();if(g.loaded)bath.beginPigmentStroke(g.colour);else bath.beginStroke();g.saved=true;g.paintSeed=seed;g.paintPhase=g.loaded?random()*TAU:0;g.paintTravel=0;g.paintCarry=0;g.lastWave=-Infinity;}
-    const wakeFrom=g.applied.slice();let steps=0,paintedAt=null;while(g.index<g.queue.length&&steps<16){const p=g.queue[g.index++],distance=Math.hypot(p[0]-g.applied[0],p[1]-g.applied[1]);
+    const wakeFrom=g.applied.slice(),stepLimit=g.queue.length-g.index>32?32:16;let steps=0,paintedAt=null;while(g.index<g.queue.length&&steps<stepLimit){const p=g.queue[g.index++],distance=Math.hypot(p[0]-g.applied[0],p[1]-g.applied[1]);
       // The same bristle-liquid movement runs for loaded and clean strokes.
       strokeStep(g,p[0],p[1]);
       if(g.loaded){g.paintTravel+=distance;g.paintCarry+=distance;const spacing=g.tool==='round'?11:8;
