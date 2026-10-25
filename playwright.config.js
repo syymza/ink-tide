@@ -1,6 +1,8 @@
 const { defineConfig } = require('playwright/test');
 module.exports = defineConfig({
-  testDir: './tests', workers: 1, timeout: 45000,
+  testDir: './tests', workers: 1,
+  // Hosted runners use software WebGL; functional checks need a larger deadline than the GPU preview.
+  timeout: process.env.CI ? 240000 : 45000,
   use: {
     baseURL: process.env.TEST_BASE_URL || 'http://127.0.0.1:48769/',
     viewport: { width: 390, height: 844 }, hasTouch: true,
