@@ -76,7 +76,7 @@
           vec2 direction=d/lengthD,normal=vec2(-direction.y,direction.x),relative=at-wakes[i].xy;
           float along=dot(relative,direction),t=clamp(along/lengthD,0.,1.),cap=along-clamp(along,0.,lengthD),crossing=dot(relative,normal);
           float age=mix(wakeAges[i].x,wakeAges[i].y,t);if(age<0.||age>.55)continue;
-          float front=370.*age,support=front+(30.+info.y*.3)*3.;if(abs(cap)>support)continue;
+          float front=370.*age,support=front+(30.+info.y*.3)*3.,span=info.z<.5?234.:info.z>1.5?20.:0.;if(abs(cap)>support||abs(crossing)>span+support)continue;
           if(info.z<.5){
             float tooth=clamp(floor(crossing/78.+.5),-3.,3.);
             vec3 fine=travellingWake(direction*cap+normal*(crossing-tooth*78.),age,info.y,info.w);
