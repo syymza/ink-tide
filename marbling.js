@@ -60,12 +60,13 @@
       this.resolvePigment=this.program(header+mapFunctions+`uniform sampler2D source;uniform sampler2D inkMask;uniform vec3 pigment;void main(){float mask=texture(inkMask,uv).r;result=vec4(mix(paint(source,coordinates(uv)).rgb,pigment,mask),1.);}`);
       this.show=this.program(header+`
         uniform sampler2D source;uniform sampler2D paperGrain;uniform bool portrait;uniform vec4 impacts[4];uniform vec4 wakes[12];uniform vec4 wakeInfo[12];
-        // A bounded transient surface field: the same travelling packet bends pigment and lights the bath.
-        // It is a stylized radial response, not a fluid solver or permanent paint transform.
-        float wakeLight(vec2 at){float light=0.;for(int i=0;i<12;i++){vec4 info=wakeInfo[i];if(info.w==0.||info.x<0.||info.x>.55)continue;vec2 d=wakes[i].zw-wakes[i].xy;float lengthD=length(d);if(lengthD<.01)continue;vec2 direction=d/lengthD,normal=vec2(-direction.y,direction.x);vec2 relative=at-wakes[i].xy;float along=dot(relative,direction),crossing=dot(relative,normal),cap=max(0.,max(-along,along-lengthD));if(cap>35.)continue;
+        // Bounded display-only refraction; cross-light strokes must remain visible too.
+        vec3 wakeSurface(vec2 at){vec2 displacement=vec2(0.);float light=0.;for(int i=0;i<12;i++){vec4 info=wakeInfo[i];if(info.w==0.||info.x<0.||info.x>.55)continue;vec2 d=wakes[i].zw-wakes[i].xy;float lengthD=length(d);if(lengthD<.01)continue;vec2 direction=d/lengthD,normal=vec2(-direction.y,direction.x);vec2 relative=at-wakes[i].xy;float along=dot(relative,direction),crossing=dot(relative,normal),cap=max(0.,max(-along,along-lengthD));if(cap>35.)continue;
           float distanceToContact=crossing;if(info.z<.5){float tooth=clamp(floor(crossing/78.+.5),-3.,3.);distanceToContact-=tooth*78.;if(abs(crossing)>255.)continue;}
-          if(abs(distanceToContact)>info.y*3.)continue;float envelope=exp(-distanceToContact*distanceToContact/(info.y*info.y)-cap*cap/250.)*exp(-info.x*7.)*(1.-smoothstep(.30,.55,info.x));
-          light+=sin(distanceToContact/info.y*2.8-info.x*9.)*envelope*info.w*dot(normal,vec2(-.6,-.8));}return clamp(light,-.04,.04);}
+          if(abs(distanceToContact)>info.y*3.)continue;float envelope=exp(-distanceToContact*distanceToContact/(info.y*info.y)-cap*cap/250.)*exp(-info.x*3.5)*(1.-smoothstep(.28,.55,info.x));
+          float height=sin(abs(distanceToContact)/info.y*2.8-info.x*11.)*envelope;
+          displacement+=normal*sign(distanceToContact)*height*info.w*70.;
+          light+=height*info.w*3.2*(.65+.35*abs(dot(normal,vec2(-.6,-.8))));}return vec3(clamp(displacement,vec2(-1.4),vec2(1.4)),clamp(light,-.055,.055));}
         vec3 surface(vec2 at){vec2 displacement=vec2(0.);float light=0.;
           for(int i=0;i<4;i++){float age=impacts[i].z,amplitude=impacts[i].w;if(age<0.||age>1.35||amplitude==0.)continue;
             vec2 delta=at-impacts[i].xy;float r=length(delta);vec2 normal=delta/max(r,.001);
@@ -78,7 +79,7 @@
           }
           return vec3(displacement,clamp(light,-.055,.055));}
 
-        void main(){ivec2 cell=ivec2(gl_FragCoord.xy);vec2 p=((portrait?vec2(1499-cell.y,cell.x):vec2(cell))+.5)/world;vec3 wave=surface(model(p));vec4 fibre=texture(paperGrain,p);vec3 colour=paint(source,texturePoint(model(p)-wave.xy)).rgb;result=vec4(colour*mix(vec3(1.),fibre.rgb,fibre.a)+wave.z+wakeLight(model(p)),1.);}
+        void main(){ivec2 cell=ivec2(gl_FragCoord.xy);vec2 p=((portrait?vec2(1499-cell.y,cell.x):vec2(cell))+.5)/world;vec3 wave=surface(model(p)),wake=wakeSurface(model(p));vec4 fibre=texture(paperGrain,p);vec3 colour=paint(source,texturePoint(model(p)-wave.xy-wake.xy)).rgb;result=vec4(colour*mix(vec3(1.),fibre.rgb,fibre.a)+wave.z+wake.z,1.);}
       `);
       this.blank();
     }
