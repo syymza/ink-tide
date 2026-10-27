@@ -60,13 +60,33 @@
       this.resolvePigment=this.program(header+mapFunctions+`uniform sampler2D source;uniform sampler2D inkMask;uniform vec3 pigment;void main(){float mask=texture(inkMask,uv).r;result=vec4(mix(paint(source,coordinates(uv)).rgb,pigment,mask),1.);}`);
       this.show=this.program(header+`
         uniform sampler2D source;uniform sampler2D paperGrain;uniform bool portrait;uniform vec4 impacts[4];uniform vec4 wakes[12];uniform vec4 wakeInfo[12];
-        // Bounded display-only refraction; cross-light strokes must remain visible too.
-        vec3 wakeSurface(vec2 at){vec2 displacement=vec2(0.);float light=0.;for(int i=0;i<12;i++){vec4 info=wakeInfo[i];if(info.w==0.||info.x<0.||info.x>.55)continue;vec2 d=wakes[i].zw-wakes[i].xy;float lengthD=length(d);if(lengthD<.01)continue;vec2 direction=d/lengthD,normal=vec2(-direction.y,direction.x);vec2 relative=at-wakes[i].xy;float along=dot(relative,direction),crossing=dot(relative,normal),cap=max(0.,max(-along,along-lengthD));if(cap>35.)continue;
-          float distanceToContact=crossing;if(info.z<.5){float tooth=clamp(floor(crossing/78.+.5),-3.,3.);distanceToContact-=tooth*78.;if(abs(crossing)>255.)continue;}
-          if(abs(distanceToContact)>info.y*3.)continue;float envelope=exp(-distanceToContact*distanceToContact/(info.y*info.y)-cap*cap/250.)*exp(-info.x*3.5)*(1.-smoothstep(.28,.55,info.x));
-          float height=sin(abs(distanceToContact)/info.y*2.8-info.x*11.)*envelope;
-          displacement+=normal*sign(distanceToContact)*height*info.w*70.;
-          light+=height*info.w*3.2*(.65+.35*abs(dot(normal,vec2(-.6,-.8))));}return vec3(clamp(displacement,vec2(-1.4),vec2(1.4)),clamp(light,-.055,.055));}
+        uniform vec2 wakeAges[12];
+        vec3 travellingWake(vec2 delta,float age,float width,float strength){
+          float r=length(delta),front=370.*age,sigma=30.+width*.3,q=(r-front)/sigma;
+          if(abs(q)>3.)return vec3(0.);
+          vec2 normal=delta/max(r,.001);float phase=(r-front)*.095;
+          float envelope=exp(-.5*q*q)*smoothstep(0.,.025,age)*(1.-smoothstep(.32,.55,age));
+          float height=sin(phase)*envelope,slope=(.095*cos(phase)-q/sigma*sin(phase))*envelope;
+          float light=slope*strength*18.*(.65+.35*abs(dot(normal,vec2(-.6,-.8))));
+          return vec3(normal*height*strength*70.,light);
+        }
+        vec3 wakeSurface(vec2 at){vec3 sum=vec3(0.);for(int i=0;i<12;i++){
+          vec4 info=wakeInfo[i];if(info.w==0.||info.x<0.||info.x>.55)continue;
+          vec2 d=wakes[i].zw-wakes[i].xy;float lengthD=length(d);if(lengthD<.01)continue;
+          vec2 direction=d/lengthD,normal=vec2(-direction.y,direction.x),relative=at-wakes[i].xy;
+          float along=dot(relative,direction),t=clamp(along/lengthD,0.,1.),cap=along-clamp(along,0.,lengthD),crossing=dot(relative,normal);
+          float age=mix(wakeAges[i].x,wakeAges[i].y,t);if(age<0.||age>.55)continue;
+          float front=370.*age,support=front+(30.+info.y*.3)*3.;if(abs(cap)>support)continue;
+          if(info.z<.5){
+            float tooth=clamp(floor(crossing/78.+.5),-3.,3.);
+            vec3 fine=travellingWake(direction*cap+normal*(crossing-tooth*78.),age,info.y,info.w);
+            vec3 merged=travellingWake(direction*cap+normal*(crossing-clamp(crossing,-234.,234.)),age,info.y,info.w);
+            sum+=mix(fine,merged,smoothstep(.035,.14,age));
+          }else{
+            float contact=info.z>1.5?clamp(crossing,-20.,20.):0.;
+            sum+=travellingWake(direction*cap+normal*(crossing-contact),age,info.y,info.w);
+          }
+        }return vec3(clamp(sum.xy,vec2(-1.4),vec2(1.4)),clamp(sum.z,-.055,.055));}
         vec3 surface(vec2 at){vec2 displacement=vec2(0.);float light=0.;
           for(int i=0;i<4;i++){float age=impacts[i].z,amplitude=impacts[i].w;if(age<0.||age>1.35||amplitude==0.)continue;
             vec2 delta=at-impacts[i].xy;float r=length(delta);vec2 normal=delta/max(r,.001);
@@ -112,6 +132,6 @@
     }
     resolveStroke(){const p=this.pigmentStroke?this.resolvePigment:this.resolve;this.use(p,this.work);this.bind(p,'source',this.base.texture,0);this.bind(p,'coordinateMap',this.maps[this.mapIndex].texture,1);if(this.pigmentStroke){this.bind(p,'inkMask',this.masks[this.mapIndex].texture,2);this.gl.uniform3fv(this.uniform(p,'pigment'),this.strokeColour);}this.draw();this.active=true;}
     commit(){if(!this.active)return;[this.base,this.work]=[this.work,this.base];this.active=false;this.cache=null;}
-    display(portrait,impacts=[],wakes=[]){const gl=this.gl,p=this.show;this.use(p,null);this.bind(p,'source',(this.active?this.work:this.base).texture,0);this.bind(p,'paperGrain',this.grain,1);gl.uniform1i(this.uniform(p,'portrait'),portrait?1:0);const field=new Float32Array(16);for(let i=0;i<Math.min(4,impacts.length);i++)field.set(impacts[i],i*4);gl.uniform4fv(this.uniform(p,'impacts[0]'),field);const lines=new Float32Array(48),info=new Float32Array(48);for(let i=0;i<Math.min(12,wakes.length);i++){lines.set(wakes[i].slice(0,4),i*4);info.set(wakes[i].slice(4,8),i*4);}gl.uniform4fv(this.uniform(p,'wakes[0]'),lines);gl.uniform4fv(this.uniform(p,'wakeInfo[0]'),info);this.draw();}
+    display(portrait,impacts=[],wakes=[]){const gl=this.gl,p=this.show;this.use(p,null);this.bind(p,'source',(this.active?this.work:this.base).texture,0);this.bind(p,'paperGrain',this.grain,1);gl.uniform1i(this.uniform(p,'portrait'),portrait?1:0);const field=new Float32Array(16);for(let i=0;i<Math.min(4,impacts.length);i++)field.set(impacts[i],i*4);gl.uniform4fv(this.uniform(p,'impacts[0]'),field);const lines=new Float32Array(48),info=new Float32Array(48),ages=new Float32Array(24);for(let i=0;i<Math.min(12,wakes.length);i++){lines.set(wakes[i].slice(0,4),i*4);info.set(wakes[i].slice(4,8),i*4);ages.set([wakes[i][8]??wakes[i][4],wakes[i][4]],i*2);}gl.uniform4fv(this.uniform(p,'wakes[0]'),lines);gl.uniform4fv(this.uniform(p,'wakeInfo[0]'),info);gl.uniform2fv(this.uniform(p,'wakeAges[0]'),ages);this.draw();}
   };
 })();

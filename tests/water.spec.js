@@ -99,3 +99,63 @@ test('native diagonal tool wakes are visible on phone, and export/undo clear the
     await page.locator('#undo').click(); expect(await page.locator('canvas').evaluate(c => c.toDataURL())).toBe(blank);
   }
 });
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  test(`instrument crests travel away from contact before settling at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport); await open(page);
+    const profiles = await page.evaluate(() => {
+      const { bath, paint } = waterTest, portrait = innerWidth <= 740, c = bath.canvas;
+      const copy = new OffscreenCanvas(c.width, c.height), ctx = copy.getContext('2d');
+      const pixels = () => { ctx.drawImage(c, 0, 0); return ctx.getImageData(0, 0, c.width, c.height).data; };
+      paint(portrait, [], []); const blank = pixels();
+      const results = [];
+      for (const [kind, width, strength] of [[0, 11, .018], [1, 10, .023], [2, 26, .015]]) {
+        const peaks = [];
+        for (const age of [.1, .3]) {
+          paint(portrait, [], [[530, 550, 970, 550, age, width, kind, strength]]); const current = pixels();
+          let peak = 0, energy = 0;
+          for (let r = 15; r < 170; r++) {
+            let value = 0;
+            for (let x = 720; x <= 780; x += 3) {
+              const y = 550 + (kind === 0 ? 234 : kind === 2 ? 20 : 0) + r;
+              const px = portrait ? 1100 - y : x, py = portrait ? x : y, index = (py * c.width + px) * 4;
+              value += Math.abs(current[index] - blank[index]);
+            }
+            if (value > energy) { energy = value; peak = r; }
+          }
+          peaks.push({ age, peak, energy });
+        }
+        paint(portrait, [], [[530, 550, 970, 550, .551, width, kind, strength]]);
+        results.push({ kind, peaks, settled: pixels().every((v, i) => v === blank[i]) });
+      }
+      paint(portrait, [], []); return results;
+    });
+    for (const result of profiles) {
+      expect(result.peaks[0].energy).toBeGreaterThan(30);
+      expect(result.peaks[1].energy).toBeGreaterThan(30);
+      expect(result.peaks[1].peak - result.peaks[0].peak).toBeGreaterThan(45);
+      expect(result.peaks[1].peak - result.peaks[0].peak).toBeLessThan(110);
+      expect(result.settled).toBe(true);
+    }
+  });
+}
+
+test('held release retains movement age instead of making a new water impulse', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 }); await open(page);
+  await page.locator('#round').click();
+  await page.evaluate(() => {
+    window.releaseSamples = [];
+    const display = waterTest.bath.display;
+    waterTest.bath.display = function (...args) { releaseSamples.push({ time: performance.now(), wakes: args[2] }); return display.apply(this, args); };
+  });
+  const r = await page.locator('canvas').boundingBox(), y = r.y + r.height / 2;
+  await page.mouse.move(r.x + r.width * 400 / 1500, y); await page.mouse.down();
+  await page.mouse.move(r.x + r.width * 1100 / 1500, y, { steps: 20 });
+  await page.waitForTimeout(200);
+  const released = await page.evaluate(() => performance.now()); await page.mouse.up();
+  await page.waitForTimeout(80);
+  const result = await page.evaluate(released => releaseSamples.filter(s => s.time >= released).flatMap(s => s.wakes), released);
+  expect(result.length).toBeGreaterThan(0);
+  expect(result.every(w => w[4] > .15)).toBe(true);
+  expect(result.every(w => w[8] >= w[4])).toBe(true);
+});
