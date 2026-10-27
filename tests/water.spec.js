@@ -159,3 +159,31 @@ test('held release retains movement age instead of making a new water impulse', 
   expect(result.every(w => w[4] > .15)).toBe(true);
   expect(result.every(w => w[8] >= w[4])).toBe(true);
 });
+
+test('water packet pressure fades before reclaiming a slot and never queues excess emissions', async ({ page }) => {
+  const source = fs.readFileSync(require('path').join(__dirname, '../app.js'), 'utf8');
+  await page.route('**/app.js*', route => route.fulfill({ contentType: 'text/javascript', body: source.replace(
+    '  function addWake(g,from,to,start,end){',
+    '  window.waterBudget={emit:addWake,fade:wakeFade,packets:()=>wakes};\n  function addWake(g,from,to,start,end){'
+  ) }));
+  await open(page);
+  const result = await page.evaluate(() => {
+    const realNow = performance.now.bind(performance), g = { tool: 'round' }; let now = 1000;
+    performance.now = () => now;
+    try {
+      for (let i = 0; i < 14; i++) {
+        now = 1000 + i * 2;
+        waterBudget.emit(g, [i * 100, 500], [i * 100 + 3, 500], now - 1, now);
+      }
+      const full = waterBudget.packets().map(w => ({ ...w })), oldest = full[0];
+      const initial = waterBudget.fade(oldest, oldest.retiring - 10);
+      const halfway = waterBudget.fade(oldest, oldest.retiring + 30);
+      const faded = waterBudget.fade(oldest, oldest.retiring + 60);
+      now = 1100; waterBudget.emit(g, [2000, 500], [2003, 500], now - 1, now);
+      return { count: full.length, skipped: full.every(w => w.line[0] < 1200), initial, halfway, faded,
+        reclaimed: !waterBudget.packets().some(w => w.line[0] === oldest.line[0]),
+        latest: waterBudget.packets().at(-1).line[0], finalCount: waterBudget.packets().length };
+    } finally { performance.now = realNow; }
+  });
+  expect(result).toEqual({ count: 12, skipped: true, initial: 1, halfway: .5, faded: 0, reclaimed: true, latest: 2000, finalCount: 12 });
+});

@@ -21,7 +21,7 @@
   for(let i=0;i<grain.data.length;i+=4){const n=(random()-.5)*18;grain.data[i]=129+n;grain.data[i+1]=123+n;grain.data[i+2]=106+n;grain.data[i+3]=13+random()*14;}
   let bath;try{bath=new InkBath(canvas,grain.data);}catch(error){console.error(error);notify('This browser could not open the drawing surface.');return;}
   const database=new Promise((resolve,reject)=>{const request=indexedDB.open(KEY,1);request.onupgradeneeded=()=>request.result.createObjectStore('paper');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-  function render(){const start=performance.now();bath.display(portrait,waves.map(w=>[w.x,w.y,(surfaceTime-w.start)/1000,reduced.matches?0:w.amplitude]),(reduced.matches?[]:wakes.map(w=>[...w.line,(surfaceTime-w.end)/1000,w.width,w.kind,w.strength,(surfaceTime-w.start)/1000])));metrics.renders++;metrics.mapPasses=bath.passes;metrics.maxRenderMs=Math.max(metrics.maxRenderMs,performance.now()-start);canvas.dataset.motion=JSON.stringify(metrics);}
+  function render(){const start=performance.now();bath.display(portrait,waves.map(w=>[w.x,w.y,(surfaceTime-w.start)/1000,reduced.matches?0:w.amplitude]),(reduced.matches?[]:wakes.map(w=>[...w.line,(surfaceTime-w.end)/1000,w.width,w.kind,w.strength*wakeFade(w,surfaceTime),(surfaceTime-w.start)/1000])));metrics.renders++;metrics.mapPasses=bath.passes;metrics.maxRenderMs=Math.max(metrics.maxRenderMs,performance.now()-start);canvas.dataset.motion=JSON.stringify(metrics);}
   function resize(){portrait=phone.matches;canvas.width=portrait?H:W;canvas.height=portrait?W:H;if(growing)placeArrival(growing.x,growing.y);if(hoverPoint)cursor(hoverPoint);render();}
   function snapshot(){lastGood={pixels:bath.read(),seed,study,waves:waves.map(w=>({...w,age:surfaceTime-w.start}))};return lastGood;}
   function remember(){history.push(snapshot());if(history.length>16)history.shift();$('undo').disabled=false;}
@@ -29,8 +29,10 @@
   function saveNow(){clearTimeout(saveTimer);if(restoring)return;if(growing||gesture){persist();return;}const saved={...snapshot(),waves:[],chosen};database.then(db=>{const t=db.transaction('paper','readwrite');t.objectStore('paper').put(saved,'latest');}).catch(()=>{});}
   function persist(){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{if(growing||gesture){persist();return;}if(window.requestIdleCallback)requestIdleCallback(saveNow,{timeout:1000});else saveNow();},600);}
   function notify(message){$('toast').textContent=message;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2000);}
+  const wakeFade=(w,now)=>w.retiring===undefined?1:Math.max(0,Math.min(1,1-(now-w.retiring)/60));
+  const liveWake=(w,now)=>now-w.end<550&&wakeFade(w,now)>0;
   function animateSurface(now){
-    waveFrame=null;surfaceTime=now;waves=waves.filter(w=>now-w.start<1350);wakes=wakes.filter(w=>now-w.end<550);render();
+    waveFrame=null;surfaceTime=now;waves=waves.filter(w=>now-w.start<1350);wakes=wakes.filter(w=>liveWake(w,now));render();
     if(waves.length||wakes.length)waveFrame=requestAnimationFrame(animateSurface);
   }
   function startSurface(){if(!waveFrame)waveFrame=requestAnimationFrame(animateSurface);}
@@ -41,8 +43,13 @@
     const kind=g.tool==='comb'?0:g.tool==='round'?1:2,last=wakes.at(-1),line=[...from,...to];
     const dx=to[0]-from[0],dy=to[1]-from[1],prior=last&&[last.line[2]-last.line[0],last.line[3]-last.line[1]];
     const straight=prior&&(dx*prior[0]+dy*prior[1])>Math.hypot(dx,dy)*Math.hypot(...prior)*.97;
-    if(last&&last.kind===kind&&start-last.end<20&&end-last.start<60&&straight&&Math.hypot(to[0]-last.line[0],to[1]-last.line[1])<90){last.line[2]=to[0];last.line[3]=to[1];last.end=end;}
-    else{wakes=wakes.filter(w=>now-w.end<550).slice(-11);wakes.push({line,start,end,kind,width:kind===0?11:kind===1?10:26,strength:kind===0?.018:kind===1?.023:.015});}
+    if(last&&last.retiring===undefined&&last.kind===kind&&start-last.end<20&&end-last.start<60&&straight&&Math.hypot(to[0]-last.line[0],to[1]-last.line[1])<90){last.line[2]=to[0];last.line[3]=to[1];last.end=end;}
+    else{
+      wakes=wakes.filter(w=>liveWake(w,now));
+      if(wakes.length>=10&&wakes[0].retiring===undefined)wakes[0].retiring=now;
+      if(wakes.length>=12)return;
+      wakes.push({line,start,end,kind,width:kind===0?11:kind===1?10:26,strength:kind===0?.018:kind===1?.023:.015});
+    }
     startSurface();
   }
   function clearWakes(){wakes=[];}
