@@ -21,7 +21,7 @@
   for(let i=0;i<grain.data.length;i+=4){const n=(random()-.5)*18;grain.data[i]=129+n;grain.data[i+1]=123+n;grain.data[i+2]=106+n;grain.data[i+3]=13+random()*14;}
   let bath;try{bath=new InkBath(canvas,grain.data);}catch(error){console.error(error);notify('This browser could not open the drawing surface.');return;}
   const database=new Promise((resolve,reject)=>{const request=indexedDB.open(KEY,1);request.onupgradeneeded=()=>request.result.createObjectStore('paper');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-  function render(){const start=performance.now();bath.display(portrait,waves.map(w=>[w.x,w.y,(surfaceTime-w.start)/1000,reduced.matches?0:w.amplitude]),(reduced.matches?[]:wakes.map(w=>[...w.line,(surfaceTime-w.end)/1000,w.width,w.kind,w.strength*wakeFade(w,surfaceTime),(surfaceTime-w.start)/1000])));metrics.renders++;metrics.mapPasses=bath.passes;metrics.maxRenderMs=Math.max(metrics.maxRenderMs,performance.now()-start);canvas.dataset.motion=JSON.stringify(metrics);}
+  function render(){const start=performance.now();bath.display(portrait,waves.map(w=>[w.x,w.y,(surfaceTime-w.start)/1000,reduced.matches?0:w.amplitude]),(reduced.matches?[]:wakes.map(w=>[...w.line,(start-w.end)/1000,w.width,w.kind,w.strength*wakeFade(w,start),(start-w.start)/1000])));metrics.renders++;metrics.mapPasses=bath.passes;metrics.maxRenderMs=Math.max(metrics.maxRenderMs,performance.now()-start);canvas.dataset.motion=JSON.stringify(metrics);}
   function resize(){portrait=phone.matches;canvas.width=portrait?H:W;canvas.height=portrait?W:H;if(growing)placeArrival(growing.x,growing.y);if(hoverPoint)cursor(hoverPoint);render();}
   function snapshot(){lastGood={pixels:bath.read(),seed,study,waves:waves.map(w=>({...w,age:surfaceTime-w.start}))};return lastGood;}
   function remember(){history.push(snapshot());if(history.length>16)history.shift();$('undo').disabled=false;}
@@ -32,7 +32,7 @@
   const wakeFade=(w,now)=>w.retiring===undefined?1:Math.max(0,Math.min(1,1-(now-w.retiring)/60));
   const liveWake=(w,now)=>now-w.end<550&&wakeFade(w,now)>0;
   function animateSurface(now){
-    waveFrame=null;surfaceTime=now;waves=waves.filter(w=>now-w.start<1350);wakes=wakes.filter(w=>liveWake(w,now));render();
+    waveFrame=null;surfaceTime=now;waves=waves.filter(w=>now-w.start<1350);const wakeNow=performance.now();wakes=wakes.filter(w=>liveWake(w,wakeNow));if(!gesture?.frame)render();
     if(waves.length||wakes.length)waveFrame=requestAnimationFrame(animateSurface);
   }
   function startSurface(){if(!waveFrame)waveFrame=requestAnimationFrame(animateSurface);}

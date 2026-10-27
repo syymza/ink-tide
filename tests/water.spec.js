@@ -74,7 +74,7 @@ test('native diagonal tool wakes are visible on phone, and export/undo clear the
     const r = await page.locator('canvas').boundingBox();
     const point = (x, y) => ({ x: r.x + (1 - y / 1100) * r.width, y: r.y + x / 1500 * r.height });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point(650, 450)] });
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(722, 546)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(657.2, 459.6)] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await page.waitForFunction(() => waterTest.last?.[2]?.some(w => w[4] >= 0));
     const visibility = await page.evaluate(() => {
@@ -141,12 +141,20 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
 }
 
 test('held release retains movement age instead of making a new water impulse', async ({ page }) => {
+  await page.addInitScript(() => {
+    const raf = window.requestAnimationFrame;
+    window.waterFrame = null;
+    window.requestAnimationFrame = callback => raf.call(window, time => {
+      window.waterFrame = time;
+      try { return callback(time - 180); } finally { window.waterFrame = null; }
+    });
+  });
   await page.setViewportSize({ width: 1280, height: 800 }); await open(page);
   await page.locator('#round').click();
   await page.evaluate(() => {
     window.releaseSamples = [];
     const display = waterTest.bath.display;
-    waterTest.bath.display = function (...args) { releaseSamples.push({ time: performance.now(), wakes: args[2] }); return display.apply(this, args); };
+    waterTest.bath.display = function (...args) { releaseSamples.push({ time: performance.now(), frame: window.waterFrame, wakes: args[2] }); return display.apply(this, args); };
   });
   const r = await page.locator('canvas').boundingBox(), y = r.y + r.height / 2;
   await page.mouse.move(r.x + r.width * 400 / 1500, y); await page.mouse.down();
@@ -156,9 +164,14 @@ test('held release retains movement age instead of making a new water impulse', 
   await page.waitForTimeout(80);
   const result = await page.evaluate(released => ({
     emitted: releaseSamples.some(s => s.time < released && s.wakes.length > 0),
+    maxDrawsPerFrame: Math.max(0, ...Object.values(releaseSamples.reduce((counts, sample) => {
+      if (sample.frame != null) counts[sample.frame] = (counts[sample.frame] || 0) + 1;
+      return counts;
+    }, {}))),
     after: releaseSamples.filter(s => s.time >= released).flatMap(s => s.wakes)
   }), released);
   expect(result.emitted).toBe(true);
+  expect(result.maxDrawsPerFrame).toBe(1);
   // Slow rendering may exhaust the old wake's lifetime before release is observed.
   expect(result.after.every(w => w[4] > .15)).toBe(true);
   expect(result.after.every(w => w[8] >= w[4])).toBe(true);
