@@ -1,6 +1,8 @@
 const { defineConfig } = require('playwright/test');
 module.exports = defineConfig({
   testDir: './tests', workers: 1,
+  ...(process.env.TEST_SUITE === 'water' ? { testMatch: '**/water.spec.js' } :
+    process.env.TEST_SUITE === 'core' ? { testIgnore: '**/water.spec.js' } : {}),
   // Hosted runners use software WebGL; functional checks need a larger deadline than the GPU preview.
   timeout: process.env.CI ? 240000 : 45000,
   use: {
