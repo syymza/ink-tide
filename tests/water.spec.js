@@ -1,0 +1,101 @@
+const { test, expect } = require('playwright/test');
+const fs = require('fs');
+
+async function open(page) {
+  await page.addInitScript(() => {
+    let constructor;
+    Object.defineProperty(window, 'InkBath', {
+      get: () => constructor,
+      set(value) {
+        constructor = new Proxy(value, { construct(Target, args) {
+          const bath = Reflect.construct(Target, args), display = bath.display;
+          window.waterTest = { bath, paint: (...args) => display.apply(bath, args), last: null };
+          bath.display = function (...args) { waterTest.last = args; return display.apply(this, args); };
+          return bath;
+        } });
+      }
+    });
+    window.waterPixels = () => {
+      const c = document.querySelector('canvas'), r = c.getBoundingClientRect();
+      const copy = new OffscreenCanvas(Math.round(r.width), Math.round(r.height)), x = copy.getContext('2d');
+      x.drawImage(c, 0, 0, copy.width, copy.height); return x.getImageData(0, 0, copy.width, copy.height).data;
+    };
+    window.waterDifference = (a, b) => {
+      let max = 0, visible = 0, light = 0, dark = 0;
+      for (let i = 0; i < a.length; i += 4) {
+        const delta = a[i] - b[i]; max = Math.max(max, Math.abs(delta));
+        if (Math.abs(delta) >= 3) visible++;
+        if (delta > 0) light++; if (delta < 0) dark++;
+      }
+      return { max, visible, light, dark };
+    };
+  });
+  await page.goto('./'); await page.waitForFunction(() => window.inkTideDiagnostics?.ready());
+}
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+  test(`water remains visible in every direction at ${viewport.width}px and never writes pigment`, async ({ page }) => {
+    await page.setViewportSize(viewport); await open(page);
+    const result = await page.evaluate(async () => {
+      const { bath, paint } = waterTest, portrait = innerWidth <= 740;
+      async function inkHash() {
+        bath.cache = null;
+        return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bath.read()))).join(',');
+      }
+      const before = await inkHash(); paint(portrait, [], []); const blank = waterPixels(), cases = [];
+      for (const [kind, width, strength] of [[0, 11, .018], [1, 10, .023], [2, 26, .015]]) {
+        for (const [x, y] of [[1, 0], [0, 1], [.6, .8], [-.6, -.8]]) {
+          const wake = [750 - 220 * x, 550 - 220 * y, 750 + 220 * x, 550 + 220 * y, .08, width, kind, strength];
+          paint(portrait, [], [wake]); cases.push(waterDifference(waterPixels(), blank));
+        }
+      }
+      paint(portrait, [], [[530, 550, 970, 550, .56, 11, 0, .018]]);
+      const expired = waterDifference(waterPixels(), blank), after = await inkHash();
+      const impact = [[750, 550, .3, 5]];
+      paint(portrait, impact, []); const drop = waterPixels();
+      paint(portrait, impact, [[530, 550, 970, 550, .56, 11, 0, .018]]);
+      const expiredWithDrop = waterDifference(waterPixels(), drop); paint(portrait, [], []);
+      return { cases, expired, before, after, expiredWithDrop };
+    });
+    for (const value of result.cases) {
+      expect(value.max).toBeGreaterThanOrEqual(4); expect(value.visible).toBeGreaterThan(20);
+      expect(value.light).toBeGreaterThan(0); expect(value.dark).toBeGreaterThan(0);
+    }
+    expect(result.expired.max).toBe(0); expect(result.expiredWithDrop.max).toBe(0);
+    expect(result.after).toBe(result.before);
+  });
+}
+
+test('native diagonal tool wakes are visible on phone, and export/undo clear the temporary surface', async ({ page }) => {
+  await open(page); const blank = await page.locator('canvas').evaluate(c => c.toDataURL());
+  const cdp = await page.context().newCDPSession(page);
+  for (const tool of ['comb', 'round', 'fan']) {
+    await page.locator('#' + tool).click();
+    const r = await page.locator('canvas').boundingBox();
+    const point = (x, y) => ({ x: r.x + (1 - y / 1100) * r.width, y: r.y + x / 1500 * r.height });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point(650, 450)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point(722, 546)] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => waterTest.last?.[2]?.some(w => w[4] >= 0));
+    const visibility = await page.evaluate(() => {
+      const { paint, last } = waterTest, actual = waterPixels();
+      paint(last[0], last[1], []); const quiet = waterPixels(); paint(...last);
+      return waterDifference(actual, quiet);
+    });
+    expect(visibility.max).toBeGreaterThanOrEqual(4);
+    const download = page.waitForEvent('download'); await page.locator('#save').click();
+    const saved = 'data:image/png;base64,' + fs.readFileSync(await (await download).path()).toString('base64');
+    const identicalPixels = await page.evaluate(async ([a, b]) => {
+      async function decode(data) {
+        const image = await createImageBitmap(await (await fetch(data)).blob());
+        const copy = new OffscreenCanvas(image.width, image.height), x = copy.getContext('2d');
+        x.drawImage(image, 0, 0); return x.getImageData(0, 0, image.width, image.height).data;
+      }
+      const [left, right] = await Promise.all([decode(a), decode(b)]);
+      return left.length === right.length && left.every((value, i) => value === right[i]);
+    }, [saved, blank]);
+    expect(identicalPixels).toBe(true);
+    expect(await page.evaluate(() => inkTideDiagnostics.surface().wakes)).toBe(0);
+    await page.locator('#undo').click(); expect(await page.locator('canvas').evaluate(c => c.toDataURL())).toBe(blank);
+  }
+});
